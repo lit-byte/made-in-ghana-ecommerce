@@ -1,0 +1,1 @@
+{% extends "base.html" %}{% block content %}<h1>My Wishlist</h1><div class="grid">{% for w in items %}<article class="card"><div class="pad"><h3>{{w.product.name}}</h3><p>GHS {{'%.2f'|format(w.product.price)}}</p><a class="btn" href="{{url_for('product',product_id=w.product.id)}}">View</a></div></article>{% else %}<p>Your wishlist is empty.</p>{% endfor %}</div>{% endblock %}

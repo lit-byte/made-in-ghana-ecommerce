@@ -1,0 +1,356 @@
+import os
+from pathlib import Path
+from decimal import Decimal
+from functools import wraps
+from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
+from flask_sqlalchemy import SQLAlchemy
+from werkzeug.security import generate_password_hash, check_password_hash
+from dotenv import load_dotenv
+
+load_dotenv()
+
+app = Flask(__name__)
+app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev-change-me")
+app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv(
+    "DATABASE_URL", "sqlite:///" + str(Path(app.instance_path) / "made_in_ghana.db")
+)
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+db = SQLAlchemy(app)
+
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False)
+    email = db.Column(db.String(160), unique=True, nullable=False)
+    password_hash = db.Column(db.String(255), nullable=False)
+    role = db.Column(db.String(30), default="customer")
+    country = db.Column(db.String(80), default="Ghana")
+    seller_approved = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, server_default=db.func.now())
+    products = db.relationship("Product", backref="seller", lazy=True)
+
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
+
+class Category(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), unique=True, nullable=False)
+    slug = db.Column(db.String(120), unique=True, nullable=False)
+
+class Product(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    seller_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    category_id = db.Column(db.Integer, db.ForeignKey("category.id"), nullable=False)
+    name = db.Column(db.String(180), nullable=False)
+    description = db.Column(db.Text, nullable=False)
+    price = db.Column(db.Numeric(12, 2), nullable=False)
+    stock = db.Column(db.Integer, default=0)
+    image_url = db.Column(db.String(500))
+    origin = db.Column(db.String(80), default="Ghana")
+    approved = db.Column(db.Boolean, default=False)
+    featured = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, server_default=db.func.now())
+    category = db.relationship("Category")
+
+class Order(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    total = db.Column(db.Numeric(12, 2), nullable=False)
+    status = db.Column(db.String(40), default="Pending")
+    payment_method = db.Column(db.String(50), default="Mobile Money")
+    phone = db.Column(db.String(30), nullable=False)
+    address = db.Column(db.String(300), nullable=False)
+    city = db.Column(db.String(100), nullable=False)
+    created_at = db.Column(db.DateTime, server_default=db.func.now())
+    user = db.relationship("User", backref="orders")
+    items = db.relationship("OrderItem", backref="order", cascade="all, delete-orphan")
+
+class OrderItem(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    order_id = db.Column(db.Integer, db.ForeignKey("order.id"), nullable=False)
+    product_id = db.Column(db.Integer, db.ForeignKey("product.id"), nullable=False)
+    quantity = db.Column(db.Integer, nullable=False)
+    price = db.Column(db.Numeric(12, 2), nullable=False)
+    product = db.relationship("Product")
+
+def current_user():
+    uid = session.get("user_id")
+    return db.session.get(User, uid) if uid else None
+
+@app.context_processor
+def inject_globals():
+    cart = session.get("cart", {})
+    count = sum(cart.values())
+    return {"current_user": current_user(), "cart_count": count}
+
+def login_required(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not current_user():
+            flash("Please log in first.", "warning")
+            return redirect(url_for("login", next=request.path))
+        return fn(*args, **kwargs)
+    return wrapper
+
+def seller_required(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        user = current_user()
+        if not user or user.role not in ("seller", "admin") or (user.role == "seller" and not user.seller_approved):
+            flash("Seller access requires an approved seller account.", "warning")
+            return redirect(url_for("seller_register"))
+        return fn(*args, **kwargs)
+    return wrapper
+
+def admin_required(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not current_user() or current_user().role != "admin":
+            flash("Admin access required.", "danger")
+            return redirect(url_for("index"))
+        return fn(*args, **kwargs)
+    return wrapper
+
+@app.route("/")
+def index():
+    products = Product.query.filter_by(approved=True).order_by(Product.featured.desc(), Product.id.desc()).limit(12).all()
+    categories = Category.query.order_by(Category.name).all()
+    return render_template("index.html", products=products, categories=categories)
+
+@app.route("/shop")
+def shop():
+    q = request.args.get("q", "").strip()
+    category = request.args.get("category", "").strip()
+    query = Product.query.filter_by(approved=True)
+    if q:
+        query = query.filter(db.or_(Product.name.ilike(f"%{q}%"), Product.description.ilike(f"%{q}%")))
+    if category:
+        query = query.join(Category).filter(Category.slug == category)
+    products = query.order_by(Product.featured.desc(), Product.id.desc()).all()
+    return render_template("shop.html", products=products, q=q, selected_category=category, categories=Category.query.all())
+
+@app.route("/product/<int:product_id>")
+def product(product_id):
+    p = Product.query.get_or_404(product_id)
+    if not p.approved and (not current_user() or current_user().role != "admin"):
+        return redirect(url_for("shop"))
+    return render_template("product.html", product=p)
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if request.method == "POST":
+        name, email, password = request.form["name"].strip(), request.form["email"].strip().lower(), request.form["password"]
+        if User.query.filter_by(email=email).first():
+            flash("Email already registered.", "danger")
+        else:
+            u = User(name=name, email=email, country="Ghana")
+            u.set_password(password)
+            db.session.add(u); db.session.commit()
+            session["user_id"] = u.id
+            flash("Account created.", "success")
+            return redirect(url_for("index"))
+    return render_template("auth.html", mode="register")
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        u = User.query.filter_by(email=request.form["email"].strip().lower()).first()
+        if u and u.check_password(request.form["password"]):
+            session["user_id"] = u.id
+            return redirect(request.args.get("next") or url_for("index"))
+        flash("Invalid email or password.", "danger")
+    return render_template("auth.html", mode="login")
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("index"))
+
+@app.route("/seller/register", methods=["GET", "POST"])
+@login_required
+def seller_register():
+    user = current_user()
+    if request.method == "POST":
+        if user.country != "Ghana":
+            flash("Only Ghana-based sellers are accepted.", "danger")
+        else:
+            user.role = "seller"
+            user.seller_approved = False
+            db.session.commit()
+            flash("Seller application submitted. Admin approval is required.", "success")
+            return redirect(url_for("seller_dashboard"))
+    return render_template("seller_register.html")
+
+@app.route("/seller")
+@seller_required
+def seller_dashboard():
+    products = Product.query.filter_by(seller_id=current_user().id).order_by(Product.id.desc()).all()
+    return render_template("seller_dashboard.html", products=products)
+
+@app.route("/seller/product/new", methods=["GET", "POST"])
+@seller_required
+def seller_product_new():
+    if request.method == "POST":
+        p = Product(
+            seller_id=current_user().id,
+            category_id=int(request.form["category_id"]),
+            name=request.form["name"].strip(),
+            description=request.form["description"].strip(),
+            price=Decimal(request.form["price"]),
+            stock=int(request.form["stock"]),
+            image_url=request.form.get("image_url", "").strip(),
+            origin="Ghana",
+            approved=False,
+        )
+        db.session.add(p); db.session.commit()
+        flash("Product submitted for approval.", "success")
+        return redirect(url_for("seller_dashboard"))
+    return render_template("product_form.html", categories=Category.query.all(), product=None)
+
+@app.route("/cart")
+def cart():
+    cart_data = session.get("cart", {})
+    items = []
+    total = Decimal("0")
+    for pid, qty in cart_data.items():
+        p = db.session.get(Product, int(pid))
+        if p and p.approved:
+            subtotal = p.price * qty
+            total += subtotal
+            items.append((p, qty, subtotal))
+    return render_template("cart.html", items=items, total=total)
+
+@app.post("/cart/add/<int:product_id>")
+def cart_add(product_id):
+    p = Product.query.get_or_404(product_id)
+    if not p.approved or p.stock <= 0:
+        flash("This product is unavailable.", "danger")
+        return redirect(url_for("shop"))
+    cart = session.setdefault("cart", {})
+    key = str(product_id)
+    cart[key] = min(cart.get(key, 0) + int(request.form.get("quantity", 1)), p.stock)
+    session.modified = True
+    flash("Added to cart.", "success")
+    return redirect(request.referrer or url_for("shop"))
+
+@app.post("/cart/remove/<int:product_id>")
+def cart_remove(product_id):
+    cart = session.get("cart", {})
+    cart.pop(str(product_id), None)
+    session["cart"] = cart
+    return redirect(url_for("cart"))
+
+@app.route("/checkout", methods=["GET", "POST"])
+@login_required
+def checkout():
+    cart_data = session.get("cart", {})
+    items = []
+    total = Decimal("0")
+    for pid, qty in cart_data.items():
+        p = db.session.get(Product, int(pid))
+        if p and p.approved and qty <= p.stock:
+            subtotal = p.price * qty
+            total += subtotal
+            items.append((p, qty, subtotal))
+    if not items:
+        flash("Your cart is empty.", "warning")
+        return redirect(url_for("shop"))
+    if request.method == "POST":
+        order = Order(
+            user_id=current_user().id, total=total,
+            payment_method=request.form["payment_method"],
+            phone=request.form["phone"].strip(),
+            address=request.form["address"].strip(),
+            city=request.form["city"].strip(),
+            status="Pending Payment" if request.form["payment_method"] != "Cash on Delivery" else "Processing"
+        )
+        db.session.add(order)
+        db.session.flush()
+        for p, qty, subtotal in items:
+            p.stock -= qty
+            db.session.add(OrderItem(order_id=order.id, product_id=p.id, quantity=qty, price=p.price))
+        db.session.commit()
+        session["cart"] = {}
+        flash("Order placed successfully.", "success")
+        return redirect(url_for("order_detail", order_id=order.id))
+    return render_template("checkout.html", items=items, total=total)
+
+@app.route("/orders")
+@login_required
+def orders():
+    return render_template("orders.html", orders=Order.query.filter_by(user_id=current_user().id).order_by(Order.id.desc()).all())
+
+@app.route("/order/<int:order_id>")
+@login_required
+def order_detail(order_id):
+    o = Order.query.get_or_404(order_id)
+    if o.user_id != current_user().id and current_user().role != "admin":
+        return redirect(url_for("orders"))
+    return render_template("order_detail.html", order=o)
+
+@app.route("/admin")
+@admin_required
+def admin():
+    return render_template(
+        "admin.html",
+        pending_products=Product.query.filter_by(approved=False).all(),
+        pending_sellers=User.query.filter_by(role="seller", seller_approved=False).all(),
+        orders=Order.query.order_by(Order.id.desc()).limit(20).all()
+    )
+
+@app.post("/admin/product/<int:product_id>/approve")
+@admin_required
+def approve_product(product_id):
+    p = Product.query.get_or_404(product_id)
+    p.approved = True
+    db.session.commit()
+    return redirect(url_for("admin"))
+
+@app.post("/admin/seller/<int:user_id>/approve")
+@admin_required
+def approve_seller(user_id):
+    u = User.query.get_or_404(user_id)
+    u.seller_approved = True
+    db.session.commit()
+    return redirect(url_for("admin"))
+
+@app.post("/admin/order/<int:order_id>/status")
+@admin_required
+def order_status(order_id):
+    o = Order.query.get_or_404(order_id)
+    o.status = request.form["status"]
+    db.session.commit()
+    return redirect(url_for("admin"))
+
+@app.get("/api/health")
+def health():
+    return jsonify({"status": "ok", "app": "Made in Ghana", "currency": "GHS"})
+
+def seed():
+    db.create_all()
+    categories = [
+        ("Fashion & Clothing", "fashion"),
+        ("Food & Beverages", "food"),
+        ("Beauty & Personal Care", "beauty"),
+        ("Handmade & Crafts", "crafts"),
+        ("Home & Living", "home"),
+        ("Electronics & Gadgets", "electronics"),
+        ("Agriculture", "agriculture"),
+        ("Books & Education", "books"),
+    ]
+    for name, slug in categories:
+        if not Category.query.filter_by(slug=slug).first():
+            db.session.add(Category(name=name, slug=slug))
+    admin_user = User.query.filter_by(email="admin@madeinghana.local").first()
+    if not admin_user:
+        admin_user = User(name="Made in Ghana Admin", email="admin@madeinghana.local", role="admin", country="Ghana", seller_approved=True)
+        admin_user.set_password("ChangeMe123!")
+        db.session.add(admin_user)
+    db.session.commit()
+
+if __name__ == "__main__":
+    with app.app_context():
+        seed()
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")), debug=True)

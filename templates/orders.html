@@ -1,0 +1,1 @@
+{% extends "base.html" %}{% block content %}<h1>My Orders</h1>{% for o in orders %}<div class="cartrow"><span><b>#{{o.id}}</b><br>{{o.status}} • {{o.region}}</span><b>GHS {{'%.2f'|format(o.total)}}</b><a class="btn" href="{{url_for('order_detail',order_id=o.id)}}">Details</a></div>{% else %}<p>No orders yet.</p>{% endfor %}{% endblock %}

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500">
+<defs>
+<linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
+<stop offset="0" stop-color="#0b6b3a"/>
+<stop offset="1" stop-color="#e6c300"/>
+</linearGradient>
+</defs>
+<rect width="800" height="500" rx="28" fill="url(#g)"/>
+<rect y="360" width="800" height="140" fill="#555"/>
+<rect x="120" y="190" width="400" height="170" fill="#d9c6a5"/>
+<path d="M90 200L320 70L550 200Z" fill="#9b4d22"/>
+<rect x="170" y="250" width="90" height="110" fill="#3c536b"/>
+<rect x="350" y="250" width="90" height="110" fill="#3c536b"/>
+<rect x="520" y="210" width="90" height="150" fill="#c79a55"/>
+<rect x="595" y="225" width="70" height="135" fill="#8b5a2b"/>
+<circle cx="650" cy="115" r="42" fill="#f5d547"/>
+<path d="M615 330h120l-30-75h-60z" fill="#f28c28"/>
+<rect x="665" y="255" width="16" height="75" fill="#333"/>
+<text x="400" y="455" text-anchor="middle" font-family="sans-serif" font-size="42" font-weight="700" fill="white">CONSTRUCTION</text>
+</svg>

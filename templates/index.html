@@ -1,0 +1,36 @@
+{% extends "base.html" %}{% block content %}
+<section class="hero"><div><span class="pill">🇬🇭 Ghana-only marketplace</span><h1>Buy Ghanaian. Support Local. Build Ghana.</h1><p>Discover products from Ghanaian makers, farmers, artisans, brands and businesses.</p><form action="{{url_for('shop')}}"><input name="q" placeholder="Search products, brands or categories"><button>Search</button></form></div><div class="heroicon">🇬🇭</div></section>
+<div class="stats"><div><b>100%</b><span>Ghana-focused</span></div><div><b>GHS</b><span>Local pricing</span></div><div><b>B2B + B2C</b><span>Wholesale & retail</span></div><div><b>16</b><span>Regions</span></div></div>
+<section class="categories-section">
+  <div class="sectionhead">
+    <h2>Shop by category</h2>
+    <a href="{{url_for('shop')}}">View all →</a>
+  </div>
+
+  <div class="category-grid">
+    {% set category_images = {
+      "fashion": "fashion-clothing.jpg",
+      "food": "food-beverages.jpg",
+      "beauty": "beauty-personal-care.jpg",
+      "crafts": "handmade-crafts.jpg",
+      "home": "home-living.jpg",
+      "electronics": "electronics-gadgets.jpg",
+      "agriculture": "agriculture.jpg",
+      "books": "books-education.jpg",
+      "construction": "construction.svg",
+      "carpentry": "carpentry.svg"
+    } %}
+
+    {% for c in categories %}
+      <a class="category-card" href="{{url_for('shop', category=c.slug)}}">
+        <div class="category-image">
+          <img src="{{url_for('static', filename='images/categories/' ~ category_images.get(c.slug, 'ghana-default.jpg'))}}" alt="{{c.name}}">
+        </div>
+        <div class="category-name">{{c.name}}</div>
+      </a>
+    {% endfor %}
+  </div>
+</section>
+<div class="sectionhead"><h2>Featured products</h2><a href="{{url_for('shop')}}">View all →</a></div><div class="grid">{% for p in products %}<article class="card"><a href="{{url_for('product',product_id=p.id)}}">{% if p.image_url %}<img src="{{p.image_url}}" alt="">{% else %}<div class="placeholder">🇬🇭</div>{% endif %}</a><div class="pad"><small>{{p.category.name}} • {{p.region}}</small><h3>{{p.name}}</h3><strong>GHS {{'%.2f'|format(p.price)}}</strong><div><a class="btn" href="{{url_for('product',product_id=p.id)}}">View</a><form class="inline" method="post" action="{{url_for('wishlist',product_id=p.id)}}">{% if current_user %}<button class="ghost">♡</button>{% endif %}</form></div></div></article>{% else %}<p>No approved products yet. Sellers can add products after registration.</p>{% endfor %}</div>
+<section class="seller-cta"><div><h2>Sell your Ghanaian products</h2><p>Build a digital storefront and reach customers across Ghana.</p></div><a class="btn" href="{{url_for('seller_register') if current_user else url_for('register')}}">Become a seller</a></section>
+{% endblock %}
