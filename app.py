@@ -254,8 +254,20 @@ def seed():
         ("Construction","construction"),("Carpentry","carpentry")]
     for n,s in cats:
         if not Category.query.filter_by(slug=s).first(): db.session.add(Category(name=n,slug=s))
-    if not User.query.filter_by(email="admin@madeinghana.local").first():
-        u=User(name="Made in Ghana Admin",email="admin@madeinghana.local",role="admin",country="Ghana",region="Greater Accra",seller_approved=True); u.set_password("ChangeMe123!"); db.session.add(u)
+    admin_email = os.getenv("ADMIN_EMAIL")
+    admin_password = os.getenv("ADMIN_PASSWORD")
+
+    if admin_email and admin_password and not User.query.filter_by(email=admin_email).first():
+        u = User(
+            name="Made in Ghana Admin",
+            email=admin_email,
+            role="admin",
+            country="Ghana",
+            region="Greater Accra",
+            seller_approved=True
+        )
+        u.set_password(admin_password)
+        db.session.add(u)
     db.session.commit()
 
 with app.app_context():
